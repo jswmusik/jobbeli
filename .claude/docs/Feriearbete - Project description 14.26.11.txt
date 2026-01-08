@@ -1,0 +1,440 @@
+Feriearbete.se
+
+This is a platform from where youth members can apply to jobs listed by their municipality and local companies where they live. This will be used for the Swedish municipalities.
+
+Features
+Here are the features for this application.
+Admin panel
+We will build an admin panel that admin users can login to i order to manage their level of administration. This will be different from the django built in admin.
+Job portal
+This will be the place where users can access and apply to jobs.
+Roles
+Here we have listed all the roles we need for this platform.
+Super admin
+Super admins are the global admins that can do all things in the admin. They control the platform. Super admins can:
+CRUD all other roles
+CRUD all municipalities
+CRUD all workplaces
+CRUD all Companies
+Manage all job posts
+Manage super admin specific features (see list)
+CRUD list of skills - used for the CV maker and for job postings to match job. And for weighting in the lottery engine.
+CRUD list of TAGS - The tags are used for tagging jobs, so that they more easy can be shown in the search results. 
+CRUD Interests - youth users can use them for profile
+Mange the startpage - multi languages
+Manage the contact page - Multi languages - Testimonials - promoblocks
+Manage CMS feature
+Manage SEO content - With built in AI
+Municipality admin
+The municipality admin can manage everything that happens within the municipality organization. Municipality admins can:
+CRUD municipality admins for the same municipality organization, workspace admins for workspaces within the municipality.
+CRUD periods for where jobs can be listed for the selected random lottery feature
+CRUD jobs and assign them to workplaces
+CRUD Workplaces
+CRUD users (youth members and guardians) assigned to that municipality.
+CRUD Custom fields - The custom fields are used for the lottery engine 8example what school the user attend to).
+CRUD Regions - Regions are a set of municipalities that are listed within the same region. 
+Send messages - To users who are within their municipality
+
+Workspace admin
+The workspace admin manages the local workspace, it can be a faculty of the municipality or a workplace within the organization. Workspace admin can: 
+CRUD workspace admins within the same workspace.
+CRUD “lottery” jobs and assing them to a period and group within a period created by the municipality admin. 
+CRUD “normal” jobs. Jobs that will not be in the lottery system, but will be treated as normal jobs. 
+Manage all the users who got a spot at their lottery jobs, not delete them, but view and remove.
+Manage all the users who applied to a normal job, view, assign, remove (from job)
+Send messages - To users who are within their workspace, meaning they applied to jobs for that workspace.
+
+Company admin
+The company admin will manage its company within the platform. They are a separate entity from the municipality and will be using the platform similar to the municipality, but with some other or less features. The company admin can:
+CRUD company admins within the same company.
+CRUD normal job posts (They can not be using the lottery engine).
+Manage users who apply to their jobs (View, assign and remove from jobb application)
+Send messages - To users who applied to jobs within the company
+
+Youth members
+Youth members are the ones who can apply for jobs within the platform. They can apply to both municipality jobs, workspace direct jobs and to company jobs listed on the site. Youth members can only CRUD their own profile, but they can add guardians to connect with. 
+
+Guardians
+Guardians are linked (connected) to youth members. Their role is to approve job applications from youth members, if they are required to do so (this might be optional). 
+Connection
+The connection to a youth and a guardian is done via a email link (magic link). 
+Verified by BankID
+Guardians need to verify their account. They can verify either via BankID or trough uploading an image of ID card (driving licence etc).
+
+Core design goals for the engine
+True randomness, but reproducible (same inputs + same seed = same result).
+Separation of concerns:
+Eligibility (who can be included)
+Prioritization (who gets higher chance)
+Assignment (who gets which job)
+Auditability: every run produces a report the municipality can publish internally if questioned.
+Guardrails against illegal/unsafe configs (especially around protected attributes).
+
+Recommended model: “Stratified weighted lottery” (best balance of fairness + control)
+Step A — Eligibility filter (hard rules)
+Hard rules should exclude applicants, not “weigh” them.
+Examples:
+Age range for the period/group
+Grade range
+Must-have skills/certifications (for specific jobs)
+Municipality residency/school (if required) - This should be made as a custom field. So basically they can add here any custom field they created. Custom field that has single values, not free text. These can be weight in as well.
+Availability overlap with the period (your “majority of time inside the period” rule)
+Output: EligibleApplicants
+Step B — Lottery weights (soft rules)
+Each eligible applicant gets a base weight = 1.0, then optional multipliers/bonuses.
+A clean approach is “tickets”:
+Everyone starts with 1 ticket
+Criteria add tickets (or add a multiplier)
+Example (simple + explainable):
+Base: 10 tickets (everyone)
+Target age group: +3 tickets
+Target grade group: +2 tickets
+Required/preferred skill match: +1 to +5 tickets (job dependent)
+“Didn’t get a job last period”: +5 tickets (equity booster)
+“Already got a job this year”: cap weight or set to very low tickets (or exclude if municipality wants)
+This is still random: you’re just changing the probability.
+Important: If admins set “60/40 gender”, that’s no longer just weighting; it becomes quota-like behavior. See guardrails below.
+Step C — Assignment across multiple jobs in a group
+This is where many systems become unfair without noticing.
+Use a standard, fair mechanism:
+Option 1 (recommended): Random Priority + Preferences (RSD)
+Generate a random priority order of applicants (a “lottery number”).
+Go in that order:
+Give each applicant their highest ranked job in the group that still has capacity and fits hard requirements.
+Unassigned go to reserve list.
+This is widely used in fair allocation problems (it’s simple, explainable, and hard to game).
+Add weights without breaking randomness:
+Instead of pure random order, draw the order from a weighted lottery (higher weight → earlier expected position).
+Practical method: generate a random number per applicant and divide by weight (or use an exponential race). Result: still random, but biased in the intended direction.
+Step D — Reserves and second round
+Produce Assigned and ReserveRanked
+If someone declines, you offer next eligible reserve for that job (or re-run only among reserves, depending on policy)
+
+Guardrails (this matters a lot)
+1) Protected attributes like gender
+Swedish discrimination rules are strict. There is some allowance for positiv särbehandling in hiring, but only under specific conditions and mainly tied to sex and underrepresentation, not as a general quota tool.
+So in your platform:
+Default should be gender-blind lottery
+If a municipality wants gender steering, make it:
+Off by default
+Requires selecting a “legal basis / internal policy reference” field + admin acknowledgement
+Implement as a soft weighting, not strict 60/40 quotas
+Show a warning banner and log it in the audit report
+(You’re not giving legal advice—you’re building a safer product.)
+2) Custom fields
+Custom fields are powerful but risky. Add a “field type + allowed use” concept:
+“Operational fields” (availability, distance, has driver’s license) ok
+“Sensitive fields” (health, ethnicity, etc.) should be blocked or heavily restricted
+3) Anti-gaming controls
+Applicants shouldn’t see exact weighting details (“+5 tickets if X”), only high-level policy text.
+Lock the configuration when applications close.
+
+The admin experience that makes this “state of the art”
+A) Policy builder (wizard)
+Select group + jobs included
+Eligibility rules (hard filters)
+Prioritization rules (soft weights)
+Assignment method (RSD default)
+Reserve policy
+Preview + run
+B) Simulation preview (killer feature)
+Before committing, run 1,000 simulated lotteries and show:
+Expected distribution by age/grade/etc.
+How many “repeat winners” you’d get
+Probability of getting any job per applicant cohort
+This helps admins set weights responsibly instead of guessing.
+C) Audit report (auto-generated PDF/JSON)
+Include:
+Period, group, jobs included, capacities
+Application counts
+Eligibility rules
+Weight formula (human readable)
+Seed, timestamp, engine version
+Outcome lists + reserve lists
+Summary stats (distribution)
+This is exactly what municipalities need when questions come.
+
+How your listed criteria should map into the engine
+Age / Grade: Prefer as hard eligibility + optional soft boost for “priority cohorts”. Municipalities often define specific cohorts. varberg.se+1
+Skills required: Hard filter at job-level (“must have”), plus optional soft boost for “nice-to-have”.
+Gender: Default off; if enabled, soft boost only + compliance acknowledgement. do.se+2Arbetsgivarverket+2
+Custom fields: Allowed list + field-level governance.
+Already got a job:
+Best practice: “equity booster” = big bonus for those who did not get a job last period/year
+And/or “winner cap” = you can’t win twice in same year unless seats remain
+
+Period & group rule (“majority inside period”)
+Implement as a deterministic rule:
+For each job, compute overlap hours with each period
+Assign job to the period where overlap is max, but only if overlap ≥ 50% (your “majority”)
+If no period passes threshold, job must be manually assigned
+This avoids edge cases and makes it explainable.
+
+If you want one crisp spec sentence for the platform
+“The selection engine runs an auditable, reproducible lottery: applicants are first filtered by eligibility, then assigned via a weighted random priority mechanism that honors job requirements, applicant preferences, and municipality-defined equity rules, producing assignments and ranked reserves with full reporting.”
+Recommended application process (youth side)
+1) Eligibility & onboarding
+Youth creates profile (DOB/grade, municipality, contact info, optional skills/certificates). Gender, email, phone
+System shows which periods and groups they’re eligible for.
+2) Choose group(s) to apply to
+For each group (e.g., “Outdoor jobs”):
+Youth clicks “Apply to this group”
+3) Job selection mode (controlled by municipality policy)
+Municipality chooses one of these modes per group:
+Mode A — Rank top N jobs (recommended default)
+Youth picks up to 10 jobs (default 5) and ranks them 1–5.
+Optional: “I accept any job in this group if I don’t get my ranked picks” (checkbox).
+Mode B — No ranking (pure group lottery)
+Youth applies to the group only.
+Allocation is random among all jobs (still respects eligibility).
+Mode C — Single-job application
+Youth applies to one job only (more like traditional job posting).
+Useful for company/workplace admins.
+4) Availability & constraints (high value)
+Even if it’s feriejobb, add:
+Availability dates / weeks (simple checkboxes)
+“Can work weekends / evenings” (if relevant)
+Optional travel radius / preferred locations (if municipality uses it)
+These are mostly hard filters, so you don’t place someone into an impossible slot.
+5) Confirmation
+Show:
+Group applied to
+Ranked list (if enabled)
+Deadline and next steps
+Clear text: “Placement is done by lottery according to municipality rules.”
+
+Municipality admin settings (per period/group)
+Application settings
+Enable ranking: Off / On
+Max ranked jobs: 3 / 5 / 10
+Allow “accept any job in group”: Yes/No
+Allow applying to multiple groups in same period: Yes/No
+Max total applications per period (to avoid gaming): e.g., 1–2 groups
+Allocation settings
+Assignment algorithm: “Lottery with preferences” (default)
+Preference strictness:
+Strict: Only assign within ranked picks; otherwise unassigned/reserve.
+Flexible: Try ranked picks first, then “any job” if youth opted in, else reserve.
+Reserve handling: per job reserve list + group reserve list
+
+How the engine uses ranking (simple, fair, explainable)
+Use this approach:
+Run lottery to produce a random (optionally weighted) priority order of applicants.
+Go down the list:
+Try their #1 job (if capacity + eligibility match) → assign
+else #2, #3… up to #N
+If none works:
+If they checked “any job”: assign any remaining eligible job in the group
+Else: put on reserve (ranked reserve order)
+This is easy to explain to politicians, admins, and parents:
+“Everyone gets a lottery position. When it’s your turn, we try to give you your highest choice that still has spots.”
+
+Important policy choice: applying to multiple groups
+If youths can apply to multiple groups, you need a clear rule:
+Best practice: Allow multiple group applications but enforce one win per period (unless seats remain).
+Engine rule: once assigned in one group, remove them from other group lotteries (or keep as reserve only).
+
+
+Normal job listings
+Municipality, workplaces and company admins can all create normal jobs. Meaning jobs that don't use a period, group or the selected engine. They should work like normal job postings from where the youth members can apply to them like on a normal job application. The normal job should have description fields, requirement fields and all other needed fields for a job posting. 
+
+Only show jobs for users that are eligible
+Meaning that only show the jobs in the listing if the user is within the preferred age group or grad range. 
+
+Registration
+The registration needs to be very fun and engaging so that youth members want to join. We need them to at least register their email and password to get an account. But then we need them to fill in the following information:
+First and last name - mandatory
+phone number - mandatory, integer
+Municipality - Mandatory
+Gender - Mandatory
+Identifying gender - optional
+Date of birth - Mandatory
+Grade - Mandatory
+Custom fields - Custom fields created by the municipality selected in the form.
+
+IMPROVMENTS!Let the youth apply immediately so they don't miss the deadline. The application enters the lottery pool but can only be finalized/assigned once the guardian verifies.
+Add a guardian
+If a job requires guardian approval, then the youth member must add a guardian to its account. The guardian will then be sent an email to login and register to the site. They can then complete their registration and verify the account. We need the following data from the guardian:
+first and last name
+Date of birth
+phonenumber
+email address
+Set password
+
+Verify by BankID
+The guardian needs to verify its account. They can do so by either uploading an image of an id card, driving license or similar. Or they can verify by BankID. By doing so, then we will automatically have the following fields: 
+First and last name
+Date of birth
+When the guardian is verified by BankID then the guardian is verified automatically, if the guardian verifies by uploading a photo of driving license or similar, then manuell approval is needed by the municipality admin.Solution: Protected Identity (Skyddad Identitet)
+Handling Skyddad Identitet requires moving the verification of the person off the cloud, while keeping the verification of the application on the cloud.
+The "Ghost Protocol" Workflow:
+The Trigger: During the application, the youth toggles a box: "Jag har skyddad identitet / Kan ej använda BankID" (I have protected identity / Cannot use BankID).
+The Lock: The system skips the Guardian BankID step. Instead, the application enters a status called Pending_Manual_Verification.
+The Key (Reference Code): The system generates a random, non-sequential Application ID (e.g., #X9-B22). The youth is instructed to contact the municipality coordinator (via phone or physical visit) and provide this code.
+The Override:
+The Administrator logs into the Admin Panel.
+They search for #X9-B22.
+They see a blank placeholder for the Guardian.
+They click a button: "Manually Verify Guardian."
+Crucially: The Admin manually checks the papers/ID in the real world. The system never records the guardian's real name or the youth's secret address. It only records a timestamp and the Admin ID who clicked the button.
+Why this works: It fulfills the legal requirement of guardian consent without ever storing the sensitive data that would endanger the youth if the database were leaked.
+One guardian many children
+One guardian can be a guardian to many youth members. So they should have a list of youth members and it should be easy for the guardian to see what job each youth member assigned to the guardian has applied for. 
+Youth member can have several guardians
+A youth member can have several guardians, who all can approve their job applications, if they are verified. 
+2-step-verification
+We will have a 2-step verification system where a code is sent to their email that needs to be entered in order to login. 
+Remember 30 days
+We will offer a 30 days remember this device feature.
+Forgot password
+We will have a forgot password feature if the user forgot its password. So they can get a new one. 
+Login
+Users should be able to login using their email address and password
+Company profiles
+Both municipalities, workspaces and companies should have profiles from where youth members can learn more about their business and organization. Here should all the jobs from that vendor be listed as well, or at least latest 3. 
+
+Improvement: The Stripe implementation should be strictly for the private companies purchasing job slots. Municipalities need a "Enterprise/Invoice" tier in your Plan Builder that bypasses Stripe and grants access based on a contract duration
+CV maker
+We should create a smart and very easy CV maker that doesn't require the youth member to write much, better select and click things to add to the CV. We need to be smart here. Here we list skills. We also think of questions to ask a youth member for building the CV. It should be very smart and clean and easy for the youth member to use. 
+AI-powered
+I want an AI to help the youth members write a great CV. Perhaps the AI can “interview” the youth member with questions the member can answer, mostly by click and select, and try to avoid text questions as much as possible. Then when the interview is done, then when the interview is over, a CV is generated that the member can use when applying to jobs. And when a job is granted, then it automatically adds it to the CV.
+Cover letter maker
+We should do the same with the cover letter, let the AI assist the user, if the user wants. By asking questions and let the user answer. Here we can use more about charismatics in the questions. Things employers in general want to know. Then when that interview is over, the AI writes a cover letter. 
+Edit
+The user should of course be able to edit both the CV and cover letter if some changes need to be done. We therefore need to think of a nice editor for the user to use to write or change things in the two documents. 
+Download CV and cover letter
+The user should be able to download the CV and cover letter in PDF format. 
+Use CV and cover letter on applications
+The user should be able to use the CV and cover letter when the user wants to apply to a job.
+References
+The user should be able to add references that can be assigned to applications as well.
+Skills
+In the profile the user should be able to add skills and interests (both selected form the pre-created ones from super admin). These can be used for recommendations and matching to jobs.
+The job search
+We need to build a smart, very appealing search engine for jobs nearby. The user should be able to find jobs that he can apply for. They should be listed both as cards and as lists. We need to have a great filter from where the user can easily find jobs that are interesting to the user.
+Show periods and groups
+We need to have a clear way of showing periods and how many jobs are included. So maybe initial search show the period only with some “seeling” information”. Then the user can drill down to groups and finally see all the jobs listed within that group. This is better than to show all jobs and not knowing what group or period they belong to. We could perhaps list periods as first top show in list result. Then show job listing below it of individual jobs.
+
+Normal jobs listings
+We will also need to smartly think of how normal jobs are listed and shown for the youth member as well. 
+Match feature
+There should also be a match feature on the job search page from where the match feature finds jobs it thinks the user will most likely want to apply to, this is based on interests and skills and previous experience. We will then add a feature where the youth member can ask the system to match job, and send notifications when a job that matches is available.
+Like/favorite jobs
+The user should be able to like/favorite jobs and add them to a list so the user can easily find them later. 
+Local GEO detection
+The platform should detect what municipality the user is based from. Already before the user is logged in. 
+
+In the registration the user must specify what municipality the user belongs to. This will help when applying for jobs later. Since most jobs will only be available for users within the same municipality. 
+
+This means that we need to populate our DB with all the Swedish municipalities. And add a GEO location that detects what municipality the user is from. Or manually add the municipality. 
+Who can apply
+Admins can set who can apply to a job based on the location. 
+Only users from same municipality
+User from same municipality and close by municipalities (can list wich)
+Users from the same region (can create a region of municipalities)
+Users from all over Sweden (system wide)
+Messages
+We need to create an internal message system from where admins can write directly to the youth members. They should be able to send:
+Bulk messages to all applicants
+Bulk messages to all who got a job (from selected engine) and from normal jobs as well.
+Bulk message to all who did not get a job
+Bulk messages to users who are on a waiting list
+direct messages to users (individual users)
+Only direct messages allow for replies from users. But the admin should be able to set if the message allows for replies or not. If not, then the users can not write back.
+Multi language
+The platform should have the support for multi-language. We will add Swedish, English, Arabic and Ukrainian to begin with. But I will add more languages later. Every string should be translatable. This also means that other features such as the start page, email templates, CMS pages and other need to be translatable.
+Manage startpage
+The super admin should be able to manage the content from the startpage from the super admin. Hre are the sections the super admin should be able to manage:
+
+Hero section
+We will have a hero section where we have either a hero image or a background video playing. We need a title and a tagline as well as some call to action.
+Customer section 
+The super admin should be able to add customers that will be rolling in the startpage near the footer. The logos will be in black and white and light up on hover.
+Promo section slider
+We will have a promo section with a slider where the super admin can add each slider with an image and the text to be shown. Nicely animated.
+Testimonials
+The super admin should be able to add testimonials from customers using the platform.
+Call 2 action box
+We need a call 2 action box from where we let the users know how to register and login.
+SEO elements
+All SEO elements of the startpage should be there. For better SEO optimization.
+Language based
+Each section needs to be translatable. 
+
+Manage contact page
+In the same manner as the super admin can manage the start page, the super admin should also be able to manage the contact page. All the SEO elements should be there as well.
+CMS
+We will build a CMS into the super admin area. From where the super admin can create pages for the plattform. These pages can then be either added to the navigation, footer or don't have a menu they belong to. Every page needs to be translatable to the languages we use in our platform.
+
+page builder
+The page builder allows the super admin to create new pages for the platform to be posted. They can be in draft mode or published. They need to have all the SEO elements needed to rank high on search engines, so we will implement a SEO measurement tool. Each page is built on a template.
+blog posts
+The super admin can also create blog posts. They will end up in our blog, both on the startpage and in our dedicated blog section. Each blog post needs to have all the SEO elements, as well as a SEO measurement tool, to see how well prepared it is. 
+templates for pages and blog posts
+We will create templates that can be used both by pages and blog posts. These templates have different page structure and design.
+SEO pages
+We will build a SEO engine, from where we will allow AI to build SEO pages based on keywords. The keywords will be added by the super admin and then assigned to an aI to create a SEO page with image and all important SEO elements for high ranking of the keyword given, in the context of our platform. 
+Payments
+We will allow for payments on our platform. Companies can buy job posting and memberships. Either pay credits to post jobs, or a subscription based membership to give them unlimited with job postings. 
+Stripe integration
+We will be using stripe integration for the payments. 
+Plan builder
+We should build a dedicated plan builder that the super admin can manage, from here the super admin can build different plans for credits and memberships. 
+Educational platform
+We should build a learning center from where the super admin can build courses for users to take. These are informational about the platform as well as helping youth members to better apply for jobs. So each course can be targeted into each role of the platform (or to selected roles or all roles). The courses can have chapters with added lectures. A lecture can be either video (youtube) or text based. We will try to make it look and feel and function similar to linkedin Learning and similar platforms. 
+Analytics platform
+We should build an analytics platform from where our roles can get important analytic data. 
+
+IMPROVEMTNS - CUSTOM FIELDS
+The 4 Pre-defined Municipal Fields
+You asked for 5 standard, non-sensitive fields that allow municipalities to organize logistics without touching GDPR "Special Categories" (like health/religion). The m,unicipalites should be able to populate each field with its own items to select. Since schools, districts and other may vary from one municipality to another. 
+Here are the best 5 for this context:
+School:
+Why: Municipalities often have quotas
+Data Type: Dropdown.
+Residential District (Bostadsområde/Stadsdel):
+Why: To minimize travel costs/time. You don't want to assign a kid from the North side to a park job on the South side if a closer one exists.
+Data Type: Dropdown (populated by Admin).
+High School Program (Gymnasieprogram):
+Why: Matching. A youth studying "Vård och omsorg" (Health & Care) should have higher probability/priority for an Elderly Care summer job.
+Data Type: Dropdown (Standard Swedish list: Teknik, Samhäll, Fordon, etc.).
+Driver’s License Status (Körkort/Mopedkort):
+Why: Operational necessity. Some park jobs require driving a golf cart or mower; some home care jobs require a bike or moped.
+Data Type: Multi-select (AM-kort, B-kort, Traktorkort, None).
+On top of that we have grade, age in the registration field. 
+
+
+
+The Tech Stack
+1. Infrastructure (Ops)
+Provider: Hetzner (AX Series - AMD Ryzen).
+OS: Ubuntu 22.04/24.04 LTS.
+Orchestration: Coolify (Self-hosted PaaS). All services must run as Docker containers managed via Coolify.
+Proxy: Traefik (Auto-SSL via Let's Encrypt).
+2. Backend Stack
+Framework: Django (Python 3.11+).
+API Interface: Django Ninja (for type-safe, fast REST APIs).
+Database: PostgreSQL 16.
+Async/Queues: Celery + Redis.
+Mandatory for: Lottery Algorithm execution, Email sending, Virus Scanning.
+Auth: mozilla-django-oidc connecting to GrandID (Svensk e-identitet) for BankID.
+Search: Meilisearch (Dockerized).
+3. Frontend Stack
+Framework: Next.js 14+ (App Router).
+Styling: Tailwind CSS + shadcn/ui components.
+State/Data: TanStack Query (React Query).
+Validation: Zod (Must mirror Backend Pydantic schemas).
+Language: Strict TypeScript.
+4. File Handling & Security (The "Quarantine Protocol")
+Storage: MinIO (S3 compatible, self-hosted on Hetzner).
+Buckets: quarantine (private), clean-media (public-read or presigned).
+Virus Scanning: ClamAV (Dockerized).
+Workflow: User Upload -> MinIO quarantine -> Celery Task triggers ClamAV -> If Clean, move to clean-media. If Dirty, delete & log.
+Image Delivery: Imgproxy.
+Frontend uses Next.js <Image /> pointed at the self-hosted Imgproxy instance for optimization.
+5. External Services
+Email: Postmark (Transactional API). Do not use local SMTP.
+Payments: Stripe (Only for private companies, not Municipalities).
+
+
