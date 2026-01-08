@@ -111,6 +111,14 @@ class ApplicationSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'status', 'youth', 'youth_email', 'youth_name', 'youth_phone', 'youth_grade', 'job_title', 'lottery_group_name', 'created_at']
 
+    def update(self, instance, validated_data):
+        """Allow updating priority_rank."""
+        # Only allow updating priority_rank
+        if 'priority_rank' in validated_data:
+            instance.priority_rank = validated_data['priority_rank']
+            instance.save(update_fields=['priority_rank'])
+        return instance
+
     def get_youth_name(self, obj):
         """Get the full name of the youth."""
         user = obj.youth.user
