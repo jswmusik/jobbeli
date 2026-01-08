@@ -7,11 +7,83 @@ and saving the results.
 
 CRITICAL: All lottery operations must be atomic and auditable.
 """
+from datetime import date
 from django.db import transaction
 from django.utils import timezone
 from apps.jobs.models import Application, Job
 from apps.lottery.models import JobGroup, LotteryRun
+from apps.users.models import YouthProfile
 from .algorithm.rsd import RSDMatchEngine
+
+
+# Grade ordering for comparison
+GRADE_ORDER = [
+    'YEAR_1', 'YEAR_2', 'YEAR_3', 'YEAR_4', 'YEAR_5',
+    'YEAR_6', 'YEAR_7', 'YEAR_8', 'YEAR_9',
+    'GYM_1', 'GYM_2', 'GYM_3', 'GYM_4'
+]
+
+
+def calculate_age(birth_date: date, reference_date: date = None) -> int:
+    """Calculate age from birth date."""
+    if reference_date is None:
+        reference_date = date.today()
+    age = reference_date.year - birth_date.year
+    if (reference_date.month, reference_date.day) < (birth_date.month, birth_date.day):
+        age -= 1
+    return age
+
+
+def is_grade_in_range(youth_grade: str, min_grade: str | None, max_grade: str | None) -> bool:
+    """Check if youth's grade is within the required range."""
+    if not youth_grade:
+        return True  # No grade set, allow by default
+
+    try:
+        youth_idx = GRADE_ORDER.index(youth_grade)
+    except ValueError:
+        return True  # Unknown grade, allow by default
+
+    if min_grade:
+        try:
+            min_idx = GRADE_ORDER.index(min_grade)
+            if youth_idx < min_idx:
+                return False
+        except ValueError:
+            pass
+
+    if max_grade:
+        try:
+            max_idx = GRADE_ORDER.index(max_grade)
+            if youth_idx > max_idx:
+                return False
+        except ValueError:
+            pass
+
+    return True
+
+
+def check_eligibility(youth: YouthProfile, job: Job, group: JobGroup) -> tuple[bool, str]:
+    """
+    Check if a youth is eligible for a specific job.
+
+    Returns:
+        Tuple of (is_eligible, reason)
+    """
+    # Check age requirements from JobGroup
+    if youth.user.date_of_birth:
+        age = calculate_age(youth.user.date_of_birth)
+        if age < group.min_age:
+            return False, f"Too young (age {age}, min {group.min_age})"
+        if age > group.max_age:
+            return False, f"Too old (age {age}, max {group.max_age})"
+
+    # Check grade requirements from Job
+    if job.min_grade or job.max_grade:
+        if not is_grade_in_range(youth.grade, job.min_grade, job.max_grade):
+            return False, f"Grade {youth.grade} not in range {job.min_grade}-{job.max_grade}"
+
+    return True, "Eligible"
 
 
 def run_lottery_for_group(group_id: str, user_id: str) -> LotteryRun:
@@ -21,9 +93,10 @@ def run_lottery_for_group(group_id: str, user_id: str) -> LotteryRun:
     This function:
     1. Fetches all published jobs in the group
     2. Fetches all pending applications for those jobs
-    3. Runs the RSD algorithm
-    4. Updates application statuses atomically
-    5. Creates an audit record
+    3. Filters out ineligible applicants (age, grade requirements)
+    4. Runs the RSD algorithm
+    5. Updates application statuses atomically
+    6. Creates an audit record
 
     Args:
         group_id: UUID of the JobGroup to run lottery for
@@ -43,6 +116,7 @@ def run_lottery_for_group(group_id: str, user_id: str) -> LotteryRun:
         lottery_group=group,
         status='PUBLISHED'
     )
+    jobs_by_id = {str(j.id): j for j in jobs}
     job_data = [
         {"id": str(j.id), "total_spots": j.total_spots}
         for j in jobs
@@ -56,15 +130,35 @@ def run_lottery_for_group(group_id: str, user_id: str) -> LotteryRun:
     applications = Application.objects.filter(
         job__lottery_group=group,
         status='PENDING'
-    ).select_related('youth', 'job').order_by('youth_id', 'priority_rank', 'created_at')
+    ).select_related('youth', 'youth__user', 'job').order_by('youth_id', 'priority_rank', 'created_at')
 
-    # Build applicant data structure
+    # 3. Filter by eligibility and build applicant data structure
     # Each youth has a list of job choices ordered by priority_rank
     applicant_map: dict[str, list[tuple[int, str]]] = {}
+    ineligible_applications: list[dict] = []  # Track who was filtered out
 
     for app in applications:
+        youth = app.youth
+        job = app.job
         youth_id = str(app.youth_id)
         job_id = str(app.job_id)
+
+        # Check eligibility for this specific job
+        is_eligible, reason = check_eligibility(youth, job, group)
+
+        if not is_eligible:
+            ineligible_applications.append({
+                "youth_id": youth_id,
+                "youth_email": youth.user.email,
+                "job_id": job_id,
+                "job_title": job.title,
+                "reason": reason,
+            })
+            # Mark application as REJECTED due to ineligibility
+            app.status = 'REJECTED'
+            app.save(update_fields=['status'])
+            continue
+
         # Use priority_rank if set, otherwise use a high number (will be sorted by created_at)
         rank = app.priority_rank if app.priority_rank is not None else 999
 
@@ -81,16 +175,24 @@ def run_lottery_for_group(group_id: str, user_id: str) -> LotteryRun:
         applicant_data.append({"id": youth_id, "choices": job_ids})
 
     if not applicant_data:
-        raise ValueError(f"No pending applications found in group '{group.name}'")
+        raise ValueError(f"No eligible applications found in group '{group.name}'")
 
-    # 3. Generate seed and run the algorithm
+    # 4. Generate seed and run the algorithm
     # Use timestamp-based seed for uniqueness, but store it for reproducibility
     seed = int(timezone.now().timestamp() * 1000) % (2**31 - 1)
     engine = RSDMatchEngine(applicant_data, job_data, seed=seed)
     result = engine.run()
     audit_report = engine.get_audit_report(result)
 
-    # 4. Save results atomically
+    # Add eligibility filtering info to audit report
+    audit_report["eligibility"] = {
+        "total_applications_checked": len(applications),
+        "eligible_applicants": len(applicant_data),
+        "ineligible_count": len(ineligible_applications),
+        "ineligible_details": ineligible_applications,
+    }
+
+    # 5. Save results atomically
     with transaction.atomic():
         # Update LotteryRun status to RUNNING
         run_record = LotteryRun.objects.create(
