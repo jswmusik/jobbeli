@@ -193,7 +193,7 @@ export function CreateJobModal({
 
       // Fetch periods for lottery configuration
       apiClient
-        .get("/lottery/periods/")
+        .get("/periods/")
         .then((res) => {
           const data = Array.isArray(res.data)
             ? res.data
@@ -206,7 +206,7 @@ export function CreateJobModal({
 
       // Fetch job groups for lottery configuration
       apiClient
-        .get("/lottery/groups/")
+        .get("/groups/")
         .then((res) => {
           const data = Array.isArray(res.data)
             ? res.data
