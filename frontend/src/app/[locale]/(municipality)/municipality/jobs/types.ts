@@ -16,6 +16,9 @@ export interface Job {
   max_grade: string | null;  // Grade requirements
   custom_attributes: Record<string, unknown>;
   status: "DRAFT" | "PUBLISHED" | "ARCHIVED";
+  job_type: "NORMAL" | "LOTTERY";
+  lottery_group: string | null;
+  lottery_group_name: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -31,4 +34,9 @@ export const JOB_STATUS_OPTIONS = [
   { value: "DRAFT", label: "Draft" },
   { value: "PUBLISHED", label: "Published" },
   { value: "ARCHIVED", label: "Archived" },
+] as const;
+
+export const JOB_TYPE_OPTIONS = [
+  { value: "NORMAL", label: "Normal Jobb" },
+  { value: "LOTTERY", label: "Lotterijobb" },
 ] as const;

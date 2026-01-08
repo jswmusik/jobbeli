@@ -32,13 +32,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RichTextEditor } from "@/components/shared/rich-text-editor";
 import { YouTubeInput } from "@/components/shared/youtube-embed";
 import { Job, Workplace, JOB_STATUS_OPTIONS } from "./types";
 import { Badge } from "@/components/ui/badge";
-import { X } from "lucide-react";
+import { X, Briefcase, Trophy } from "lucide-react";
+import { Label } from "@/components/ui/label";
 
 // Custom field schema from municipality settings
 interface CustomFieldSchema {
@@ -47,6 +49,17 @@ interface CustomFieldSchema {
   type: "text" | "single_select" | "multi_select";
   options?: string[];
   required?: boolean;
+}
+
+interface Period {
+  id: string;
+  name: string;
+}
+
+interface JobGroup {
+  id: string;
+  name: string;
+  period: string;
 }
 
 const jobSchema = z.object({
@@ -62,8 +75,22 @@ const jobSchema = z.object({
   status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]),
   min_grade: z.string().optional().nullable(),
   max_grade: z.string().optional().nullable(),
+  job_type: z.enum(["NORMAL", "LOTTERY"]),
+  lottery_group: z.string().optional().nullable(),
   custom_attributes: z.record(z.string(), z.any()).optional(),
-});
+}).refine(
+  (data) => {
+    // If job_type is LOTTERY, lottery_group is required
+    if (data.job_type === "LOTTERY" && !data.lottery_group) {
+      return false;
+    }
+    return true;
+  },
+  {
+    message: "Lottery jobs must be assigned to a lottery group",
+    path: ["lottery_group"],
+  }
+);
 
 const GRADE_OPTIONS = [
   { value: "YEAR_1", label: "Årskurs 1" },
@@ -107,6 +134,9 @@ export function EditJobModal({
   const [error, setError] = useState<string | null>(null);
   const [workplaces, setWorkplaces] = useState<Workplace[]>([]);
   const [customSchema, setCustomSchema] = useState<CustomFieldSchema[]>([]);
+  const [periods, setPeriods] = useState<Period[]>([]);
+  const [jobGroups, setJobGroups] = useState<JobGroup[]>([]);
+  const [selectedPeriod, setSelectedPeriod] = useState<string>("");
 
   const form = useForm<JobFormData>({
     resolver: zodResolver(jobSchema),
@@ -123,9 +153,18 @@ export function EditJobModal({
       status: "DRAFT",
       min_grade: null,
       max_grade: null,
+      job_type: "NORMAL",
+      lottery_group: null,
       custom_attributes: {},
     },
   });
+
+  const jobType = form.watch("job_type");
+
+  // Filter job groups by selected period
+  const filteredJobGroups = selectedPeriod
+    ? jobGroups.filter((g) => g.period === selectedPeriod)
+    : jobGroups;
 
   // Reset form when job changes
   useEffect(() => {
@@ -143,12 +182,22 @@ export function EditJobModal({
         status: job.status,
         min_grade: job.min_grade || null,
         max_grade: job.max_grade || null,
+        job_type: job.job_type || "NORMAL",
+        lottery_group: job.lottery_group || null,
         custom_attributes: job.custom_attributes || {},
       });
-    }
-  }, [job, open, form]);
 
-  // Fetch workplaces and custom fields schema when modal opens
+      // Set the selected period based on the job's lottery_group
+      if (job.lottery_group && jobGroups.length > 0) {
+        const group = jobGroups.find((g) => g.id === job.lottery_group);
+        if (group) {
+          setSelectedPeriod(group.period);
+        }
+      }
+    }
+  }, [job, open, form, jobGroups]);
+
+  // Fetch workplaces, custom fields schema, periods, and job groups when modal opens
   useEffect(() => {
     if (open) {
       // Fetch workplaces
@@ -174,6 +223,32 @@ export function EditJobModal({
         .catch((err) => {
           console.error("Failed to fetch custom fields schema", err);
         });
+
+      // Fetch periods for lottery configuration
+      apiClient
+        .get("/lottery/periods/")
+        .then((res) => {
+          const data = Array.isArray(res.data)
+            ? res.data
+            : res.data.results || [];
+          setPeriods(data);
+        })
+        .catch((err) => {
+          console.error("Failed to fetch periods", err);
+        });
+
+      // Fetch job groups for lottery configuration
+      apiClient
+        .get("/lottery/groups/")
+        .then((res) => {
+          const data = Array.isArray(res.data)
+            ? res.data
+            : res.data.results || [];
+          setJobGroups(data);
+        })
+        .catch((err) => {
+          console.error("Failed to fetch job groups", err);
+        });
     }
   }, [open]);
 
@@ -191,6 +266,7 @@ export function EditJobModal({
         youtube_url: data.youtube_url || "",
         min_grade: data.min_grade || null,
         max_grade: data.max_grade || null,
+        lottery_group: data.job_type === "LOTTERY" ? data.lottery_group : null,
         custom_attributes: data.custom_attributes || {},
       };
 
@@ -214,6 +290,8 @@ export function EditJobModal({
         const responseData = err.response.data as Record<string, unknown>;
         if (responseData.detail) {
           errorMessage = String(responseData.detail);
+        } else if (responseData.lottery_group) {
+          errorMessage = String(responseData.lottery_group);
         }
       }
 
@@ -227,6 +305,7 @@ export function EditJobModal({
   const handleOpenChange = (newOpen: boolean) => {
     if (!newOpen) {
       setError(null);
+      setSelectedPeriod("");
     }
     onOpenChange(newOpen);
   };
@@ -348,6 +427,144 @@ export function EditJobModal({
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            {/* Job Type Selection */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+                Job Type
+              </h3>
+
+              <FormField
+                control={form.control}
+                name="job_type"
+                render={({ field }) => (
+                  <FormItem className="space-y-3">
+                    <FormControl>
+                      <RadioGroup
+                        onValueChange={(value) => {
+                          field.onChange(value);
+                          // Clear lottery_group when switching to NORMAL
+                          if (value === "NORMAL") {
+                            form.setValue("lottery_group", null);
+                            setSelectedPeriod("");
+                          }
+                        }}
+                        value={field.value}
+                        className="grid grid-cols-2 gap-4"
+                      >
+                        <div>
+                          <RadioGroupItem
+                            value="NORMAL"
+                            id="edit_job_type_normal"
+                            className="peer sr-only"
+                          />
+                          <Label
+                            htmlFor="edit_job_type_normal"
+                            className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer"
+                          >
+                            <Briefcase className="mb-3 h-6 w-6" />
+                            <span className="font-semibold">Normal Jobb</span>
+                            <span className="text-xs text-muted-foreground text-center mt-1">
+                              Tillgänglig för alla kvalificerade sökande
+                            </span>
+                          </Label>
+                        </div>
+                        <div>
+                          <RadioGroupItem
+                            value="LOTTERY"
+                            id="edit_job_type_lottery"
+                            className="peer sr-only"
+                          />
+                          <Label
+                            htmlFor="edit_job_type_lottery"
+                            className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer"
+                          >
+                            <Trophy className="mb-3 h-6 w-6" />
+                            <span className="font-semibold">Lotterijobb</span>
+                            <span className="text-xs text-muted-foreground text-center mt-1">
+                              Tilldelas via lotterisystemet
+                            </span>
+                          </Label>
+                        </div>
+                      </RadioGroup>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {/* Lottery Configuration - Only shown when LOTTERY is selected */}
+              {jobType === "LOTTERY" && (
+                <div className="space-y-4 p-4 border rounded-lg bg-amber-50/50">
+                  <h4 className="text-sm font-medium">Lotterikonfiguration</h4>
+
+                  {/* Period Filter */}
+                  <div className="space-y-2">
+                    <Label>Filtrera per period (valfritt)</Label>
+                    <Select
+                      onValueChange={(value) => {
+                        setSelectedPeriod(value === "all" ? "" : value);
+                        // Clear lottery_group when period changes
+                        form.setValue("lottery_group", null);
+                      }}
+                      value={selectedPeriod || "all"}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Alla perioder" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Alla perioder</SelectItem>
+                        {periods.map((period) => (
+                          <SelectItem key={period.id} value={period.id}>
+                            {period.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Job Group Selection */}
+                  <FormField
+                    control={form.control}
+                    name="lottery_group"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Lotterigrupp *</FormLabel>
+                        {filteredJobGroups.length === 0 ? (
+                          <p className="text-sm text-muted-foreground py-2">
+                            Inga lotterigrupper tillgängliga
+                            {selectedPeriod && " för den valda perioden"}. Skapa en
+                            grupp först i Lotterihantering.
+                          </p>
+                        ) : (
+                          <Select
+                            onValueChange={field.onChange}
+                            value={field.value || undefined}
+                          >
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Välj lotterigrupp" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {filteredJobGroups.map((group) => (
+                                <SelectItem key={group.id} value={group.id}>
+                                  {group.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                        <FormDescription>
+                          Jobbet kommer att tilldelas via lotteriet för denna grupp
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              )}
+            </div>
+
             {/* Basic Info Section */}
             <div className="space-y-4">
               <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">

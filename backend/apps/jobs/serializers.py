@@ -15,6 +15,11 @@ class JobSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True
     )
+    lottery_group_name = serializers.CharField(
+        source='lottery_group.name',
+        read_only=True,
+        allow_null=True
+    )
 
     class Meta:
         model = Job
@@ -41,6 +46,10 @@ class JobSerializer(serializers.ModelSerializer):
             'application_deadline',
             'custom_attributes',
             'status',
+            # Job type and lottery
+            'job_type',
+            'lottery_group',
+            'lottery_group_name',
             'created_at',
             'updated_at',
         ]
@@ -49,9 +58,26 @@ class JobSerializer(serializers.ModelSerializer):
             'municipality',
             'municipality_name',
             'workplace_name',
+            'lottery_group_name',
             'created_at',
             'updated_at',
         ]
+
+    def validate(self, data):
+        """Validate that lottery jobs have a lottery_group assigned."""
+        job_type = data.get('job_type', getattr(self.instance, 'job_type', None))
+        lottery_group = data.get('lottery_group', getattr(self.instance, 'lottery_group', None))
+
+        if job_type == 'LOTTERY' and not lottery_group:
+            raise serializers.ValidationError({
+                'lottery_group': 'Lottery jobs must be assigned to a lottery group.'
+            })
+
+        # Clear lottery_group if job_type is NORMAL
+        if job_type == 'NORMAL' and 'lottery_group' in data:
+            data['lottery_group'] = None
+
+        return data
 
 
 class ApplicationSerializer(serializers.ModelSerializer):

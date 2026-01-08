@@ -10,6 +10,10 @@ class Job(models.Model):
         PUBLISHED = 'PUBLISHED', 'Published'
         ARCHIVED = 'ARCHIVED', 'Archived'
 
+    class JobType(models.TextChoices):
+        NORMAL = 'NORMAL', 'Normal'
+        LOTTERY = 'LOTTERY', 'Lottery'
+
     class Grade(models.TextChoices):
         YEAR_1 = 'YEAR_1', 'Årskurs 1'
         YEAR_2 = 'YEAR_2', 'Årskurs 2'
@@ -105,6 +109,13 @@ class Job(models.Model):
         max_length=20,
         choices=Status.choices,
         default=Status.DRAFT
+    )
+
+    job_type = models.CharField(
+        max_length=20,
+        choices=JobType.choices,
+        default=JobType.NORMAL,
+        help_text="Normal jobs are always available; Lottery jobs are assigned via the lottery system"
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
