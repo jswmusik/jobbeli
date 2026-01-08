@@ -86,6 +86,11 @@ class ApplicationSerializer(serializers.ModelSerializer):
     # Read-only details for the frontend to show "You applied to [Job Title]"
     job_details = JobSerializer(source='job', read_only=True)
     youth_email = serializers.CharField(source='youth.user.email', read_only=True)
+    youth_name = serializers.SerializerMethodField()
+    youth_phone = serializers.CharField(source='youth.user.phone', read_only=True, allow_null=True)
+    youth_grade = serializers.CharField(source='youth.grade', read_only=True, allow_null=True)
+    job_title = serializers.CharField(source='job.title', read_only=True)
+    lottery_group_name = serializers.CharField(source='job.lottery_group.name', read_only=True, allow_null=True)
 
     class Meta:
         model = Application
@@ -93,10 +98,22 @@ class ApplicationSerializer(serializers.ModelSerializer):
             'id',
             'job',
             'job_details',
+            'job_title',
+            'lottery_group_name',
             'youth',
             'youth_email',
+            'youth_name',
+            'youth_phone',
+            'youth_grade',
             'status',
             'priority_rank',
             'created_at',
         ]
-        read_only_fields = ['id', 'status', 'youth', 'youth_email', 'created_at']
+        read_only_fields = ['id', 'status', 'youth', 'youth_email', 'youth_name', 'youth_phone', 'youth_grade', 'job_title', 'lottery_group_name', 'created_at']
+
+    def get_youth_name(self, obj):
+        """Get the full name of the youth."""
+        user = obj.youth.user
+        if user.first_name or user.last_name:
+            return f"{user.first_name} {user.last_name}".strip()
+        return user.email

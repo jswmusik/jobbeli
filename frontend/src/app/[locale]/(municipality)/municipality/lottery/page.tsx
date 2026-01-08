@@ -14,9 +14,10 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, Users, Layers, History, Play, Loader2 } from "lucide-react";
+import { Calendar, Users, Layers, History, Play, Loader2, Eye } from "lucide-react";
 import { CreatePeriodModal } from "./create-period-modal";
 import { CreateGroupModal } from "./create-group-modal";
+import { LotteryResultsModal } from "./lottery-results-modal";
 
 interface Period {
   id: string;
@@ -41,6 +42,7 @@ interface JobGroup {
 
 interface LotteryRun {
   id: string;
+  group: string;
   group_name: string;
   status: string;
   executed_at: string;
@@ -48,6 +50,8 @@ interface LotteryRun {
   candidates_count: number;
   matched_count: number;
   unmatched_count: number;
+  seed: number;
+  audit_report: Record<string, unknown>;
 }
 
 export default function LotteryPage() {
@@ -56,6 +60,8 @@ export default function LotteryPage() {
   const [runs, setRuns] = useState<LotteryRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [runningLottery, setRunningLottery] = useState<string | null>(null);
+  const [selectedRun, setSelectedRun] = useState<LotteryRun | null>(null);
+  const [resultsModalOpen, setResultsModalOpen] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -377,6 +383,7 @@ export default function LotteryPage() {
                       <TableHead>Av</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Resultat</TableHead>
+                      <TableHead className="text-right">Åtgärder</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -397,6 +404,19 @@ export default function LotteryPage() {
                             {run.candidates_count} kandidater
                           </span>
                         </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setSelectedRun(run);
+                              setResultsModalOpen(true);
+                            }}
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            Visa resultat
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -406,6 +426,13 @@ export default function LotteryPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Lottery Results Modal */}
+      <LotteryResultsModal
+        open={resultsModalOpen}
+        onOpenChange={setResultsModalOpen}
+        run={selectedRun}
+      />
     </div>
   );
 }
