@@ -178,6 +178,7 @@ const schema = z.object({
 - Use Server Components for SEO pages, Client Components for interactive features
 - All API calls go through `lib/api/` wrappers
 - Mobile-first for youth dashboard
+- **Toast Notifications**: Use `sonner` (shadcn/ui) for all user feedback on actions (success, error). Import with `import { toast } from "sonner"` and use `toast.success()`, `toast.error()`, etc.
 
 ## Logging & Observability
 
